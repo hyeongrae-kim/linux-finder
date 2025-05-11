@@ -116,7 +116,7 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
     wattron(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR)); // 굵게, 일반 색상 적용
     mvwprintw(main_win, 0, 0, "%-*s %-*s %-*s %s",
               name_col_width, "Name",
-              type_col_width, "Type",
+              type_col_width - 4, "Type",
               mtime_col_width, "Modified",
               "Size"); // Size 컬럼은 남은 공간을 사용하므로 %-*s 대신 %s
     wattroff(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR)); // 속성 해제
