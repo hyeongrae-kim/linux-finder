@@ -93,8 +93,8 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
     // 각 컬럼의 너비 정의 (대략적인 값, 동적으로 조절 가능)
     // 컬럼 간 최소 1칸의 공백 또는 구분자가 필요
     int name_col_width = max_x / 2;
-    int type_col_width = max_x / 6;
-    int mtime_col_width = max_x / 6;
+    int type_col_width = max_x / 5;
+    int mtime_col_width = max_x / 5;
     // 나머지 공간을 크기 컬럼에 할당 (헤더, 타입, 수정일 컬럼 너비 및 구분자/패딩 공간 고려)
     int size_col_width = max_x - name_col_width - type_col_width - mtime_col_width;
 
