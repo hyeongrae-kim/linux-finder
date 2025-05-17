@@ -2,6 +2,7 @@
 #define UI_H
 
 #include <ncurses.h> // ncurses 라이브러리 사용을 위한 헤더
+#include <ncursesw/ncurses.h> // 한글문제 해결해보기
 #include "fs.h"      // FileEntry 구조체와 MAX_FILES 등을 사용하기 위해 포함 (fs.h에 정의되어 있다고 가정)
 
 // 색상 쌍(Color Pair) 정의 (사용자 정의 가능)

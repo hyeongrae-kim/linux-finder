@@ -9,6 +9,16 @@
 #define MAX_NAME_LEN 256
 #define MAX_PATH_LEN 1024
 
+// fs.h 구조체 필드 크기 수정
+typedef struct {
+    char name[MAX_NAME_LEN];  // 파일 이름
+    char type[32];            // 파일 종류 (16에서 32로 증가)
+    char mtime[24];           // 수정일 (20에서 24로 증가)
+    char size[16];            // 파일 크기 (그대로 유지)
+    mode_t mode;              // 파일 모드
+} FileEntry;
+
+/*
 typedef struct {
     char name[MAX_NAME_LEN];  // 파일 이름
     char type[16];            // 파일 종류 (예: "디렉토리", "일반 파일")
@@ -16,6 +26,7 @@ typedef struct {
     char size[16];            // 파일 크기 (예: "1.2KB")
     mode_t mode;              // 파일 모드 (파일 유형 및 권한 확인용)
 } FileEntry;
+*/
 
 // 파일 목록 가져오기 함수
 int get_file_list(const char *path, FileEntry *files, int max_files);

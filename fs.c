@@ -13,24 +13,34 @@
 #include <libgen.h>
 
 // 파일 유형을 문자열로 반환
+// fs.c의 get_file_type 함수 수정
 static void get_file_type(mode_t mode, char *type, size_t size) {
-    if (S_ISDIR(mode)) {
-        strncpy(type, "디렉토리", size);
-    } else if (S_ISREG(mode)) {
-        strncpy(type, "일반 파일", size);
-    } else if (S_ISLNK(mode)) {
-        strncpy(type, "심볼릭 링크", size);
-    } else if (S_ISFIFO(mode)) {
-        strncpy(type, "FIFO", size);
-    } else if (S_ISSOCK(mode)) {
-        strncpy(type, "소켓", size);
-    } else if (S_ISBLK(mode)) {
-        strncpy(type, "블록 장치", size);
-    } else if (S_ISCHR(mode)) {
-        strncpy(type, "문자 장치", size);
-    } else {
-        strncpy(type, "알 수 없음", size);
+    // 버퍼 크기 확인
+    if (size < 16) {
+        strncpy(type, "?", size);
+        type[size - 1] = '\0';
+        return;
     }
+    
+    if (S_ISDIR(mode)) {
+        strcpy(type, "디렉토리");
+    } else if (S_ISREG(mode)) {
+        strcpy(type, "일반 파일");
+    } else if (S_ISLNK(mode)) {
+        strcpy(type, "심볼릭 링크");
+    } else if (S_ISFIFO(mode)) {
+        strcpy(type, "FIFO");
+    } else if (S_ISSOCK(mode)) {
+        strcpy(type, "소켓");
+    } else if (S_ISBLK(mode)) {
+        strcpy(type, "블록 장치");
+    } else if (S_ISCHR(mode)) {
+        strcpy(type, "문자 장치");
+    } else {
+        strcpy(type, "알 수 없음");
+    }
+    
+    // null 종료 문자 보장
     type[size - 1] = '\0';
 }
 

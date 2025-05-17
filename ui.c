@@ -10,6 +10,7 @@ WINDOW *footer_win_path = NULL;
 WINDOW *footer_win_stats = NULL;
 
 void init_ui() {
+	putenv("NCURSES_NO_UTF8_ACS=1");
     initscr();              // ncurses 모드 시작
     clear();                // 화면 지우기
     noecho();               // 입력한 문자가 화면에 바로 보이지 않도록 설정
