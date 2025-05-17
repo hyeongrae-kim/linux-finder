@@ -9,11 +9,6 @@ WINDOW *main_win = NULL;
 WINDOW *footer_win_path = NULL;
 WINDOW *footer_win_stats = NULL;
 
-// 푸터의 높이 정의
-#define FOOTER_HEIGHT_PATH 1  // 경로 표시 푸터 라인 수
-#define FOOTER_HEIGHT_STATS 1 // 통계 표시 푸터 라인 수
-#define FOOTER_TOTAL_HEIGHT (FOOTER_HEIGHT_PATH + FOOTER_HEIGHT_STATS) // 총 푸터 높이
-
 void init_ui() {
     initscr();              // ncurses 모드 시작
     clear();                // 화면 지우기
@@ -62,6 +57,10 @@ void init_ui() {
     keypad(main_win, TRUE);
 
     refresh_screen(); // 초기 화면 반영
+	refresh();        // stdscr 갱신
+    wrefresh(main_win);     // 메인 윈도우 갱신
+    wrefresh(footer_win_path);  // 경로 푸터 갱신
+    wrefresh(footer_win_stats); // 통계 푸터 갱신
 }
 
 void close_ui() {

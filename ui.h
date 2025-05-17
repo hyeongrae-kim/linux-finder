@@ -9,6 +9,11 @@
 #define COLOR_PAIR_HIGHLIGHT 2 // 선택된 항목 강조용 색상 쌍 ID
 #define COLOR_PAIR_FOOTER 3    // 하단 정보 표시용 색상 쌍 ID
 
+// 푸터 높이 정의
+#define FOOTER_HEIGHT_PATH 1
+#define FOOTER_HEIGHT_STATS 1
+#define FOOTER_TOTAL_HEIGHT (FOOTER_HEIGHT_PATH + FOOTER_HEIGHT_STATS)
+
 /**
  * @brief ncurses 화면 및 UI 설정을 초기화합니다.
  * 프로그램 시작 시 한 번 호출되어야 합니다.
@@ -59,5 +64,10 @@ void clear_main_content_area();
  * @brief 물리적 화면을 새로고침하여 변경 사항을 반영합니다.
  */
 void refresh_screen();
+
+/**
+ * @brief 터미널 크기 변경 시 UI 윈도우를 재구성합니다.
+ */
+void resize_ui();
 
 #endif // UI_H
