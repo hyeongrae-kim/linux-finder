@@ -58,7 +58,7 @@ static void format_time(time_t mtime, char *buf, size_t buf_size) {
     strftime(buf, buf_size, "%Y-%m-%d %H:%M", tm_info);
 }
 
-// 파일 목록 가져오기
+// file list 불러오기 
 int get_file_list(const char *path, FileEntry *files, int max_files) {
     DIR *dir;
     struct dirent *entry;
@@ -71,9 +71,10 @@ int get_file_list(const char *path, FileEntry *files, int max_files) {
         return -1;
     }
     
+    // 모든 파일 및 디렉토리 가져오기
     while ((entry = readdir(dir)) != NULL && count < max_files) {
-        // . 과 .. 디렉토리는 건너뛰기 (선택사항)
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+        // "."은 제외
+        if (strcmp(entry->d_name, ".") == 0) {
             continue;
         }
         
@@ -110,6 +111,19 @@ int get_file_list(const char *path, FileEntry *files, int max_files) {
     }
     
     closedir(dir);
+    
+    // ".."만 맨 앞으로 이동
+    for (int i = 0; i < count; i++) {
+        if (strcmp(files[i].name, "..") == 0 && i > 0) {
+            FileEntry temp = files[i];
+            for (int j = i; j > 0; j--) {
+                files[j] = files[j-1];
+            }
+            files[0] = temp;
+            break; // ".."은 하나만 있으므로 찾으면 바로 종료
+        }
+    }
+    
     return count;
 }
 
