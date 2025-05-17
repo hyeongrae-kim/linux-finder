@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -12,9 +13,37 @@
 #include <errno.h>
 #include <libgen.h>
 
+// 파일 확장자를 기반으로 프로그래밍 언어 타입 반환
+static const char* get_programming_language(const char *filename) {
+    const char *ext = strrchr(filename, '.');
+    if (!ext) return NULL; // 확장자가 없는 경우
+
+    ext++; // '.' 다음 문자로 이동
+
+    if (strcasecmp(ext, "c") == 0) return "C source";
+    if (strcasecmp(ext, "h") == 0) return "C header";
+    if (strcasecmp(ext, "cpp") == 0 || strcasecmp(ext, "cc") == 0) return "C++ source";
+    if (strcasecmp(ext, "hpp") == 0) return "C++ header";
+    if (strcasecmp(ext, "py") == 0) return "Python source";
+    if (strcasecmp(ext, "java") == 0) return "Java source";
+    if (strcasecmp(ext, "js") == 0) return "JS source";
+    if (strcasecmp(ext, "html") == 0) return "HTML file";
+    if (strcasecmp(ext, "css") == 0) return "CSS file";
+    if (strcasecmp(ext, "php") == 0) return "PHP source";
+    if (strcasecmp(ext, "rb") == 0) return "Ruby source";
+    if (strcasecmp(ext, "go") == 0) return "Go source";
+    if (strcasecmp(ext, "rs") == 0) return "Rust source";
+    if (strcasecmp(ext, "sh") == 0) return "Shell script";
+    if (strcasecmp(ext, "asm") == 0 || strcasecmp(ext, "s") == 0) return "Assembly source";
+    if (strcasecmp(ext, "swift") == 0) return "Swift source";
+    if (strcasecmp(ext, "kt") == 0) return "Kotlin source";
+
+    return NULL; // 알려진 프로그래밍 언어가 아닌 경우
+}
+
 // 파일 유형을 문자열로 반환
 // fs.c의 get_file_type 함수 수정
-static void get_file_type(mode_t mode, char *type, size_t size) {
+static void get_file_type(mode_t mode, char *type, size_t size, const char *filename) {
     // 버퍼 크기 확인
     if (size < 16) {
         strncpy(type, "?", size);
@@ -22,10 +51,16 @@ static void get_file_type(mode_t mode, char *type, size_t size) {
         return;
     }
     
-    if (S_ISDIR(mode)) {
-        strcpy(type, "디렉토리");
-    } else if (S_ISREG(mode)) {
+	if (S_ISREG(mode)) {
+        const char *prog_lang = get_programming_language(filename);
+        if (prog_lang) {
+            strncpy(type, prog_lang, size - 1);
+            type[size - 1] = '\0';
+            return;
+        }
         strcpy(type, "일반 파일");
+    } else if (S_ISDIR(mode)) {
+        strcpy(type, "디렉토리");
     } else if (S_ISLNK(mode)) {
         strcpy(type, "심볼릭 링크");
     } else if (S_ISFIFO(mode)) {
@@ -102,8 +137,8 @@ int get_file_list(const char *path, FileEntry *files, int max_files) {
         files[count].name[MAX_NAME_LEN - 1] = '\0';
         
         // 파일 종류 저장
-        get_file_type(file_stat.st_mode, files[count].type, sizeof(files[count].type));
-        
+		get_file_type(file_stat.st_mode, files[count].type, sizeof(files[count].type), entry->d_name);
+                
         // 파일 크기 저장 (디렉토리는 "-"로 표시)
         if (S_ISDIR(file_stat.st_mode)) {
             strncpy(files[count].size, "-", sizeof(files[count].size));
@@ -208,7 +243,7 @@ bool get_file_info(const char *path, FileEntry *file) {
     file->name[MAX_NAME_LEN - 1] = '\0';
     
     // 파일 종류 저장
-    get_file_type(file_stat.st_mode, file->type, sizeof(file->type));
+	get_file_type(file_stat.st_mode, file->type, sizeof(file->type), file->name);
     
     // 파일 크기 저장
     if (S_ISDIR(file_stat.st_mode)) {
@@ -234,4 +269,27 @@ bool is_executable(const FileEntry *file) {
 // 파일이 디렉토리인지 확인
 bool is_directory(const FileEntry *file) {
     return S_ISDIR(file->mode);
+}
+
+// 파일을 편집기로 열기
+bool edit_file(const char *path) {
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        perror("fork 실패");
+        return false;
+    } else if (pid == 0) {
+        // 자식 프로세스: 먼저 vim을 시도하고, 실패하면 vi 시도
+        execlp("vim", "vim", path, NULL);
+        // vim이 실패하면 vi 시도
+        execlp("vi", "vi", path, NULL);
+        // 둘 다 실패한 경우
+        perror("편집기 실행 실패");
+        exit(EXIT_FAILURE);
+    } else {
+        // 부모 프로세스: 자식 프로세스 종료 대기
+        int status;
+        waitpid(pid, &status, 0);
+        return WIFEXITED(status); // 정상 종료 여부 반환
+    }
 }
