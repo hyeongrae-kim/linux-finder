@@ -112,56 +112,53 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
     mtime_col_width -= 1;
     // size_col_width는 남은 공간을 모두 사용
 
-    // 헤더(컬럼명) 출력
-    wattron(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR)); // 굵게, 일반 색상 적용
-    mvwprintw(main_win, 0, 0, "%-*s %-*s %-*s %s",
-              name_col_width, "Name",
-              type_col_width - 4, "Type",
-              mtime_col_width, "Modified",
-              "Size"); // Size 컬럼은 남은 공간을 사용하므로 %-*s 대신 %s
-    wattroff(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR)); // 속성 해제
+	// 각 컬럼의 시작 위치 계산
+	int col1 = 0;
+	int col2 = name_col_width + 1;
+	int col3 = col2 + type_col_width + 1;
+	int col4 = col3 + mtime_col_width + 1;
+	// 헤더 출력
+	wattron(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR));
+	mvwprintw(main_win, 0, col1, "%-*s", name_col_width, "Name");
+	mvwprintw(main_win, 0, col2, "%-*s", type_col_width, "Type");
+	mvwprintw(main_win, 0, col3, "%-*s", mtime_col_width, "Modified");
+	mvwprintw(main_win, 0, col4, "Size");
+	wattroff(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR));
 
-    // 화면에 표시될 수 있는 파일들만 루프 (스크롤 오프셋과 윈도우 높이 고려)
-    for (int i = 0; i < window_height && (i + scroll_offset) < num_files; ++i) {
-        int file_index = i + scroll_offset; // 실제 파일 배열에서의 인덱스
-        if (file_index >= num_files) break; // 파일 개수 초과 시 중단
+	// 화면에 표시될 수 있는 파일들만 루프
+	for (int i = 0; i < window_height && (i + scroll_offset) < num_files; ++i) {
+		int file_index = i + scroll_offset;
+		if (file_index >= num_files) break;
 
-        int display_row = i + 1; // 헤더 다음 줄부터 파일 정보 표시
-        if (display_row >= max_y) break; // 윈도우 높이 초과 시 중단 (실제 사용 가능 높이는 window_height지만 안전하게 체크)
+		int display_row = i + 1; // 헤더 다음 줄부터 파일 정보 표시
+		if (display_row >= max_y) break;
 
-        // 현재 선택된 항목이면 강조 색상 적용
-        if (file_index == current_selection) {
-            wattron(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT)); // 강조 색상 적용
-        } else {
-            wattron(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));   // 일반 색상 적용
-        }
+		// 현재 선택된 항목이면 강조 색상 적용
+		if (file_index == current_selection) {
+			// 먼저 전체 행에 색상 배경 적용
+			wattron(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+			// 행 전체를 공백으로 채워 배경색 적용
+			for (int x = 0; x < max_x; x++) {
+				mvwaddch(main_win, display_row, x, ' ');
+			}
 
-        // 필드 내용이 너무 길 경우 자르기 위한 임시 버퍼 (컬럼 너비 + null 종료 문자)
-        char name_display[name_col_width + 1];
-        char type_display[type_col_width + 1];
-        char mtime_display[mtime_col_width + 1];
-        char size_display[size_col_width + 1]; // Size는 남은 공간 전부 사용
+			// 이제 텍스트 출력
+			mvwprintw(main_win, display_row, col1, "%-*s", name_col_width, files[file_index].name);
+			mvwprintw(main_win, display_row, col2, "%-*s", type_col_width, files[file_index].type);
+			mvwprintw(main_win, display_row, col3, "%-*s", mtime_col_width, files[file_index].mtime);
+			mvwprintw(main_win, display_row, col4, "%s", files[file_index].size);
+			wattroff(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+		} else {
+			// 일반 항목은 기존 방식으로 표시
+			wattron(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
+			mvwprintw(main_win, display_row, col1, "%-*s", name_col_width, files[file_index].name);
+			mvwprintw(main_win, display_row, col2, "%-*s", type_col_width, files[file_index].type);
+			mvwprintw(main_win, display_row, col3, "%-*s", mtime_col_width, files[file_index].mtime);
+			mvwprintw(main_win, display_row, col4, "%s", files[file_index].size);
+			wattroff(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
+		}
+	}
 
-        // 각 필드 내용을 컬럼 너비에 맞게 자르거나 형식화
-        snprintf(name_display, sizeof(name_display), "%.*s", name_col_width, files[file_index].name);
-        snprintf(type_display, sizeof(type_display), "%.*s", type_col_width, files[file_index].type);
-        snprintf(mtime_display, sizeof(mtime_display), "%.*s", mtime_col_width, files[file_index].mtime);
-        snprintf(size_display, sizeof(size_display), "%.*s", size_col_width, files[file_index].size);
-
-        // 파일 정보 출력 (각 컬럼 너비에 맞춰 왼쪽 정렬하여 출력)
-        mvwprintw(main_win, display_row, 0, "%-*s %-*s %-*s %s", // %-*s 사용
-                  name_col_width, name_display,
-                  type_col_width, type_display,
-                  mtime_col_width, mtime_display,
-                  size_display); // size_display는 남은 공간이므로 너비 지정 안 함
-
-        // 적용했던 색상 속성 해제
-        if (file_index == current_selection) {
-            wattroff(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
-        } else {
-            wattroff(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
-        }
-    }
     wrefresh(main_win); // 메인 윈도우 변경 사항 화면에 반영
 }
 

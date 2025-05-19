@@ -52,4 +52,7 @@ bool is_executable(const FileEntry *file);
 // 파일이 디렉토리인지 확인
 bool is_directory(const FileEntry *file);
 
+// 파일을 편집기로 여는 함수
+bool edit_file(const char *path);
+
 #endif

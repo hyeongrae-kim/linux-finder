@@ -147,6 +147,78 @@ int main() {
                 }
                 break;
                 
+			// main.c의 switch-case 문 수정 (Enter 키 처리 부분)
+			case '\n': // Enter 키
+				if (current_selection >= 0 && current_selection < file_count) {
+					FileEntry *selected_file = &files[current_selection];
+
+					// 선택한 파일 경로 생성
+					char selected_path[MAX_PATH_LEN];
+					snprintf(selected_path, sizeof(selected_path), "%s/%s", current_path, selected_file->name);
+
+					if (is_directory(selected_file)) {
+						// 디렉토리인 경우 해당 디렉토리로 이동
+						if (change_directory(selected_path)) {
+							// 디렉토리 변경 성공 - 새 경로의 파일 목록 가져오기
+							get_current_path(current_path, sizeof(current_path));
+							file_count = get_file_list(current_path, files, MAX_FILES);
+							get_disk_free_space(current_path, disk_free, sizeof(disk_free));
+
+							// 선택 및 스크롤 위치 초기화
+							current_selection = 0;
+							scroll_offset = 0;
+						} else {
+							// 디렉토리 변경 실패 - 에러 메시지 표시
+							mvprintw(0, 0, "디렉토리 변경 실패: %s", selected_file->name);
+							clrtoeol();
+							refresh();
+						}
+					} else if (strstr(selected_file->type, "source") != NULL ||
+							strstr(selected_file->type, "header") != NULL ||
+							strstr(selected_file->type, "script") != NULL) {
+						// 프로그래밍 언어 파일인 경우 편집기 호출
+						close_ui(); // ncurses 종료
+						if (edit_file(selected_path)) {
+							// 편집 후 ncurses 환경 복원
+							init_ui();
+
+							// 파일 목록 갱신 (편집 후 변경 사항 반영)
+							get_current_path(current_path, sizeof(current_path));
+							file_count = get_file_list(current_path, files, MAX_FILES);
+							get_disk_free_space(current_path, disk_free, sizeof(disk_free));
+						} else {
+							// 편집 실패
+							init_ui();
+							mvprintw(0, 0, "파일 편집 실패: %s", selected_file->name);
+							clrtoeol();
+							refresh();
+						}
+					} else if (is_executable(selected_file)) {
+						// 실행 가능한 파일인 경우 실행
+						close_ui(); // ncurses 종료
+						if (execute_file(selected_path)) {
+							// 실행 후 ncurses 환경 복원
+							init_ui();
+							// 파일 목록 갱신 (실행 후 변경 사항 반영)
+							get_current_path(current_path, sizeof(current_path));
+							file_count = get_file_list(current_path, files, MAX_FILES);
+							get_disk_free_space(current_path, disk_free, sizeof(disk_free));
+						} else {
+							// 실행 실패
+							init_ui();
+							mvprintw(0, 0, "파일 실행 실패: %s", selected_file->name);
+							clrtoeol();
+							refresh();
+						}
+					} else {
+						// 실행 불가능한 일반 파일
+						mvprintw(0, 0, "실행 불가능한 파일: %s", selected_file->name);
+						clrtoeol();
+						refresh();
+					}
+				}
+				break;
+				/*
             case '\n': // Enter 키
                 if (current_selection >= 0 && current_selection < file_count) {
                     FileEntry *selected_file = &files[current_selection];
@@ -199,6 +271,7 @@ int main() {
                     }
                 }
                 break;
+				*/
                 
             case '.': // 상위 디렉토리로 이동 (옵션)
                 if (change_directory("..")) {
