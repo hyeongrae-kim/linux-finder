@@ -14,18 +14,30 @@ void init_ui() {
     initscr();              // ncurses 모드 시작
     clear();                // 화면 지우기
     noecho();               // 입력한 문자가 화면에 바로 보이지 않도록 설정
-    cbreak();               // 버퍼링 없이 바로 입력 받도록 설정 (Enter 키 없이도 입력 처리)
+    raw();                  // cbreak() 대신 raw() 사용 - Ctrl 키 조합을 위해 필요
     curs_set(0);            // 커서 숨기기
     keypad(stdscr, TRUE);   // 특수 키(화살표 키 등) 사용 가능하도록 설정
-	intrflush(stdscr, FALSE); // 인터럽트 키 무시
-	raw();                     // raw 모드로 변경 (모든 키 입력을 직접 받음)
+    intrflush(stdscr, FALSE); // 인터럽트 키 무시 - Ctrl+C가 프로그램을 종료시키지 않도록
 
     if (has_colors()) {     // 터미널이 색상 지원하는지 확인
         start_color();      // 색상 사용 시작
-        // 색상 쌍 초기화: (ID, 전경색, 배경색)
-        init_pair(COLOR_PAIR_REGULAR, COLOR_WHITE, COLOR_BLACK);     // 일반: 흰색 글씨, 검은색 배경
-        init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK, COLOR_CYAN);    // 강조: 검은색 글씨, 시안색 배경 (예시)
-        init_pair(COLOR_PAIR_FOOTER, COLOR_YELLOW, COLOR_BLACK);     // 푸터: 노란색 글씨, 검은색 배경
+		if (COLORS >= 8) {
+            // 색상 쌍 초기화: (ID, 전경색, 배경색)
+            init_pair(COLOR_PAIR_REGULAR, COLOR_WHITE, COLOR_BLACK);     // 일반: 흰색 글씨, 검은색 배경
+            init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK, COLOR_CYAN);    // 강조: 검은색 글씨, 시안색 배경
+            init_pair(COLOR_PAIR_FOOTER, COLOR_YELLOW, COLOR_BLACK);     // 푸터: 노란색 글씨, 검은색 배경
+
+            // 복사 중 상태를 위한 색상 (더 명확하게)
+            if (can_change_color()) {
+                // 회색을 직접 정의할 수 있는 경우
+                init_pair(4, COLOR_BLACK, COLOR_BLACK);  // 어두운 회색 효과
+                init_pair(5, COLOR_WHITE, COLOR_BLUE);   // 복사 중 선택된 상태
+            } else {
+                // 기본 색상만 사용 가능한 경우
+                init_pair(4, COLOR_BLACK, COLOR_BLACK);  // 어두운 색상으로 회색 효과
+                init_pair(5, COLOR_WHITE, COLOR_BLUE);   // 복사 중 선택된 상태
+            }
+        }
     }
 
     int screen_rows, screen_cols;
@@ -119,6 +131,7 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
 	int col2 = name_col_width + 1;
 	int col3 = col2 + type_col_width + 1;
 	int col4 = col3 + mtime_col_width + 1;
+	
 	// 헤더 출력
 	wattron(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR));
 	mvwprintw(main_win, 0, col1, "%-*s", name_col_width, "Name");
@@ -135,10 +148,20 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
 		int display_row = i + 1; // 헤더 다음 줄부터 파일 정보 표시
 		if (display_row >= max_y) break;
 
-		// 현재 선택된 항목이면 강조 색상 적용
+		// 복사 상태에 따른 색상 결정
+		int color_pair;
+		bool is_copying = (files[file_index].copy_status == COPY_STATUS_IN_PROGRESS);
+		
 		if (file_index == current_selection) {
+			// 선택된 항목
+			if (is_copying) {
+				color_pair = 5; // 복사 중이면서 선택된 상태
+			} else {
+				color_pair = COLOR_PAIR_HIGHLIGHT; // 일반 선택 상태
+			}
+			
 			// 먼저 전체 행에 색상 배경 적용
-			wattron(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+			wattron(main_win, COLOR_PAIR(color_pair));
 			// 행 전체를 공백으로 채워 배경색 적용
 			for (int x = 0; x < max_x; x++) {
 				mvwaddch(main_win, display_row, x, ' ');
@@ -149,21 +172,26 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
 			mvwprintw(main_win, display_row, col2, "%-*s", type_col_width, files[file_index].type);
 			mvwprintw(main_win, display_row, col3, "%-*s", mtime_col_width, files[file_index].mtime);
 			mvwprintw(main_win, display_row, col4, "%s", files[file_index].size);
-			wattroff(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
+			wattroff(main_win, COLOR_PAIR(color_pair));
 		} else {
-			// 일반 항목은 기존 방식으로 표시
-			wattron(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
+			// 선택되지 않은 항목
+			if (is_copying) {
+				color_pair = 4; // 복사 중 (회색)
+			} else {
+				color_pair = COLOR_PAIR_REGULAR; // 일반 상태
+			}
+			
+			wattron(main_win, COLOR_PAIR(color_pair));
 			mvwprintw(main_win, display_row, col1, "%-*s", name_col_width, files[file_index].name);
 			mvwprintw(main_win, display_row, col2, "%-*s", type_col_width, files[file_index].type);
 			mvwprintw(main_win, display_row, col3, "%-*s", mtime_col_width, files[file_index].mtime);
 			mvwprintw(main_win, display_row, col4, "%s", files[file_index].size);
-			wattroff(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
+			wattroff(main_win, COLOR_PAIR(color_pair));
 		}
 	}
 
     wrefresh(main_win); // 메인 윈도우 변경 사항 화면에 반영
 }
-
 
 void display_footer(const char* current_path, int num_items_in_dir, const char* disk_free_space) {
     if (!footer_win_path || !footer_win_stats) return; // 푸터 윈도우가 없으면 함수 종료
@@ -260,7 +288,6 @@ void resize_ui() {
     // 이 함수를 호출한 후 메인 프로그램에서 최신 데이터를 가지고
     // display_files()와 display_footer() 함수를 다시 호출하여 그려야 합니다.
 }
-
 
 void refresh_screen() {
     // 모든 윈도우의 변경 사항을 효율적으로 화면에 반영합니다.

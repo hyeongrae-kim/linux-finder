@@ -39,6 +39,9 @@ int main() {
         // 완료된 백그라운드 작업들 정리
         cleanup_finished_tasks();
         
+        // 복사 상태 업데이트
+        update_file_copy_status(files, file_count, current_path);
+        
         // 파일 목록 및 푸터 표시
         display_files(files, file_count, current_selection, scroll_offset);
         display_footer(current_path, file_count, disk_free);
@@ -54,19 +57,7 @@ int main() {
             if (current_selection >= 0 && current_selection < file_count) {
                 char selected_path[MAX_PATH_LEN];
                 snprintf(selected_path, sizeof(selected_path), "%s/%s", current_path, files[current_selection].name);
-                
-                if (copy_to_clipboard(selected_path)) {
-                    // 복사 성공 메시지 (잠시 표시)
-                    mvprintw(0, 0, "복사됨: %s", files[current_selection].name);
-                    clrtoeol();
-                    refresh();
-                    napms(1000); // 1초간 표시
-                } else {
-                    mvprintw(0, 0, "복사 실패: %s", files[current_selection].name);
-                    clrtoeol();
-                    refresh();
-                    napms(1000);
-                }
+                copy_to_clipboard(selected_path);
             }
             continue;
         }
@@ -74,17 +65,9 @@ int main() {
         // Ctrl+V 처리 (붙여넣기)
         if (ch == 22) { // Ctrl+V의 ASCII 코드
             if (paste_from_clipboard(current_path)) {
-                // 붙여넣기 성공 - 파일 목록 갱신
+                // 붙여넣기 성공 - 파일 목록 즉시 갱신
                 file_count = get_file_list(current_path, files, MAX_FILES);
-                mvprintw(0, 0, "붙여넣기 완료");
-                clrtoeol();
-                refresh();
-                napms(1000);
-            } else {
-                mvprintw(0, 0, "붙여넣기 실패 (클립보드 비어있음)");
-                clrtoeol();
-                refresh();
-                napms(1000);
+				update_file_copy_status(files, file_count, current_path);
             }
             continue;
         }
@@ -197,7 +180,7 @@ int main() {
                 }
                 break;
                 
-            case '\n': // Enter 키 (기존 코드와 동일)
+            case '\n': // Enter 키
                 if (current_selection >= 0 && current_selection < file_count) {
                     FileEntry *selected_file = &files[current_selection];
 

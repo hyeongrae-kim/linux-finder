@@ -11,6 +11,13 @@
 #define MAX_PATH_LEN 1024
 #define LARGE_FILE_SIZE (100 * 1024 * 1024) // 100MB
 
+// 복사 상태를 나타내는 열거형
+typedef enum {
+    COPY_STATUS_NONE = 0,        // 복사 중이 아님
+    COPY_STATUS_IN_PROGRESS = 1, // 복사 진행 중
+    COPY_STATUS_COMPLETED = 2    // 복사 완료
+} CopyStatus;
+
 // fs.h 구조체 필드 크기 수정
 typedef struct {
     char name[MAX_NAME_LEN];  // 파일 이름
@@ -18,6 +25,7 @@ typedef struct {
     char mtime[24];           // 수정일 (20에서 24로 증가)
     char size[16];            // 파일 크기 (그대로 유지)
     mode_t mode;              // 파일 모드
+    CopyStatus copy_status;   // 복사 상태 추가
 } FileEntry;
 
 // 클립보드 구조체
@@ -28,9 +36,11 @@ typedef struct {
 } Clipboard;
 
 // 백그라운드 복사 작업 정보
-typedef struct {
+typedef struct CopyTask {
     char source_path[MAX_PATH_LEN];
     char dest_path[MAX_PATH_LEN];
+    char dest_dir[MAX_PATH_LEN];     // 대상 디렉토리 추가
+    char dest_name[MAX_NAME_LEN];    // 대상 파일명 추가
     bool is_directory;
     pthread_t thread_id;
     bool is_running;
@@ -82,5 +92,9 @@ bool copy_file_sync(const char *src, const char *dest);
 bool copy_directory_sync(const char *src, const char *dest);
 void* copy_thread_func(void* arg);
 bool should_use_background_copy(const char *path);
+
+// 복사 상태 관리 함수들
+void update_file_copy_status(FileEntry *files, int file_count, const char *current_path);
+bool is_copying_file(const char *file_path);
 
 #endif
