@@ -35,6 +35,9 @@ int main() {
     file_count = get_file_list(current_path, files, MAX_FILES);
     get_disk_free_space(current_path, disk_free, sizeof(disk_free));
 
+    // getch를 비블로킹 모드로 설정 (복사 작업 완료 시 UI 업데이트를 위해)
+    nodelay(stdscr, TRUE);
+
     while(1) {
         // 완료된 백그라운드 작업들 정리
         cleanup_finished_tasks();
@@ -46,7 +49,13 @@ int main() {
         display_files(files, file_count, current_selection, scroll_offset);
         display_footer(current_path, file_count, disk_free);
 
-        ch = getch(); // 사용자 입력 받기
+        ch = getch(); // 사용자 입력 받기 (비블로킹 모드)
+
+        // 입력이 없으면 (ERR 반환) 짧은 대기 후 다시 루프
+        if (ch == ERR) {
+            usleep(50000); // 50ms 대기 (UI 업데이트 주기)
+            continue;
+        }
 
         if (ch == 'q' || ch == 'Q') {
             break; // 'q' 입력 시 종료

@@ -26,6 +26,7 @@ typedef struct {
     char size[16];            // 파일 크기 (그대로 유지)
     mode_t mode;              // 파일 모드
     CopyStatus copy_status;   // 복사 상태 추가
+    off_t original_size;      // 복사 중일 때 원본 파일 크기 저장용 추가
 } FileEntry;
 
 // 클립보드 구조체
@@ -44,6 +45,9 @@ typedef struct CopyTask {
     bool is_directory;
     pthread_t thread_id;
     bool is_running;
+    off_t total_size;                // 원본 파일/디렉토리 총 크기 추가
+    off_t copied_size;               // 현재까지 복사된 크기 추가
+    pthread_mutex_t progress_mutex;  // 진행률 보호용 뮤텍스 추가
     struct CopyTask* next;  // 연결 리스트로 여러 작업 관리
 } CopyTask;
 
@@ -96,5 +100,9 @@ bool should_use_background_copy(const char *path);
 // 복사 상태 관리 함수들
 void update_file_copy_status(FileEntry *files, int file_count, const char *current_path);
 bool is_copying_file(const char *file_path);
+
+// 새로 추가된 함수들
+off_t get_directory_size(const char *path);
+CopyTask* find_copy_task_by_dest(const char *dest_path);
 
 #endif

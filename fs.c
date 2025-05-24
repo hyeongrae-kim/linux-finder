@@ -52,7 +52,6 @@ static const char* get_programming_language(const char *filename) {
 }
 
 // 파일 유형을 문자열로 반환
-// fs.c의 get_file_type 함수 수정
 static void get_file_type(mode_t mode, char *type, size_t size, const char *filename) {
     // 버퍼 크기 확인
     if (size < 16) {
@@ -113,6 +112,57 @@ static void format_time(time_t mtime, char *buf, size_t buf_size) {
     strftime(buf, buf_size, "%Y-%m-%d %H:%M", tm_info);
 }
 
+// 디렉토리 크기 계산 함수
+off_t get_directory_size(const char *path) {
+    DIR *dir;
+    struct dirent *entry;
+    struct stat file_stat;
+    char full_path[MAX_PATH_LEN];
+    off_t total_size = 0;
+    
+    if ((dir = opendir(path)) == NULL) {
+        return 0;
+    }
+    
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+        
+        if (lstat(full_path, &file_stat) == -1) {
+            continue;
+        }
+        
+        if (S_ISDIR(file_stat.st_mode)) {
+            total_size += get_directory_size(full_path);
+        } else {
+            total_size += file_stat.st_size;
+        }
+    }
+    
+    closedir(dir);
+    return total_size;
+}
+
+// 복사 작업 찾기 함수
+CopyTask* find_copy_task_by_dest(const char *dest_path) {
+    pthread_mutex_lock(&g_tasks_mutex);
+    
+    CopyTask* current = g_copy_tasks;
+    while (current) {
+        if (current->is_running && strcmp(current->dest_path, dest_path) == 0) {
+            pthread_mutex_unlock(&g_tasks_mutex);
+            return current;
+        }
+        current = current->next;
+    }
+    
+    pthread_mutex_unlock(&g_tasks_mutex);
+    return NULL;
+}
+
 // file list 불러오기 
 int get_file_list(const char *path, FileEntry *files, int max_files) {
     DIR *dir;
@@ -164,6 +214,7 @@ int get_file_list(const char *path, FileEntry *files, int max_files) {
         
         // 복사 상태 초기화
         files[count].copy_status = COPY_STATUS_NONE;
+        files[count].original_size = 0;
         
         count++;
     }
@@ -330,6 +381,7 @@ void cleanup_clipboard_system() {
             pthread_cancel(current->thread_id);
             pthread_join(current->thread_id, NULL);
         }
+        pthread_mutex_destroy(&current->progress_mutex);
         CopyTask* next = current->next;
         free(current);
         current = next;
@@ -352,6 +404,7 @@ void cleanup_finished_tasks() {
             CopyTask* to_remove = *current;
             *current = (*current)->next;
             pthread_join(to_remove->thread_id, NULL);
+            pthread_mutex_destroy(&to_remove->progress_mutex);
             free(to_remove);
         } else {
             current = &((*current)->next);
@@ -432,9 +485,8 @@ char* generate_unique_name(const char *dest_dir, const char *base_name) {
     return unique_name;
 }
 
-
-// 동기 파일 복사
-bool copy_file_sync(const char *src, const char *dest) {
+// 진행률을 추적하는 동기 파일 복사
+bool copy_file_sync_with_progress(const char *src, const char *dest, CopyTask* task) {
     int src_fd = open(src, O_RDONLY);
     if (src_fd == -1) {
         return false;
@@ -448,6 +500,7 @@ bool copy_file_sync(const char *src, const char *dest) {
 
     char buffer[8192];
     ssize_t bytes_read, bytes_written;
+    off_t total_copied = 0;
 
     while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
         bytes_written = write(dest_fd, buffer, bytes_read);
@@ -456,6 +509,14 @@ bool copy_file_sync(const char *src, const char *dest) {
             close(dest_fd);
             unlink(dest);
             return false;
+        }
+        
+        // 진행률 업데이트
+        if (task) {
+            pthread_mutex_lock(&task->progress_mutex);
+            total_copied += bytes_written;
+            task->copied_size = total_copied;
+            pthread_mutex_unlock(&task->progress_mutex);
         }
     }
 
@@ -469,6 +530,11 @@ bool copy_file_sync(const char *src, const char *dest) {
     }
 
     return bytes_read == 0;
+}
+
+// 동기 파일 복사
+bool copy_file_sync(const char *src, const char *dest) {
+    return copy_file_sync_with_progress(src, dest, NULL);
 }
 
 // 동기 디렉토리 복사
@@ -524,7 +590,7 @@ void* copy_thread_func(void* arg) {
     if (task->is_directory) {
         success = copy_directory_sync(task->source_path, task->dest_path);
     } else {
-        success = copy_file_sync(task->source_path, task->dest_path);
+        success = copy_file_sync_with_progress(task->source_path, task->dest_path, task);
     }
 
     // 복사 실패 시 임시 파일 삭제
@@ -561,7 +627,6 @@ bool is_copying_file(const char *file_path) {
     return false;
 }
 
-
 // 파일 목록의 복사 상태 업데이트
 void update_file_copy_status(FileEntry *files, int file_count, const char *current_path) {
     pthread_mutex_lock(&g_tasks_mutex);
@@ -569,6 +634,7 @@ void update_file_copy_status(FileEntry *files, int file_count, const char *curre
     // 모든 파일을 기본 상태로 초기화
     for (int i = 0; i < file_count; i++) {
         files[i].copy_status = COPY_STATUS_NONE;
+        files[i].original_size = 0;
     }
 
     // 실행 중인 작업들과 비교
@@ -590,6 +656,14 @@ void update_file_copy_status(FileEntry *files, int file_count, const char *curre
                     for (int i = 0; i < file_count; i++) {
                         if (strcmp(files[i].name, task_filename) == 0) {
                             files[i].copy_status = COPY_STATUS_IN_PROGRESS;
+                            files[i].original_size = current->total_size;
+                            
+                            // 복사 중인 파일은 원본 크기로 표시
+                            if (current->is_directory) {
+                                strncpy(files[i].size, "-", sizeof(files[i].size));
+                            } else {
+                                format_size(current->total_size, files[i].size, sizeof(files[i].size));
+                            }
                             break;
                         }
                     }
@@ -690,10 +764,26 @@ bool paste_from_clipboard(const char *dest_dir) {
         strcpy(task->dest_name, unique_name);
         task->is_directory = g_clipboard.is_directory;
         task->is_running = true;
+        
+        // 원본 크기 계산
+        if (task->is_directory) {
+            task->total_size = get_directory_size(g_clipboard.source_path);
+        } else {
+            task->total_size = get_file_size(g_clipboard.source_path);
+        }
+        task->copied_size = 0;
+        
+        // 진행률 뮤텍스 초기화
+        if (pthread_mutex_init(&task->progress_mutex, NULL) != 0) {
+            free(task);
+            pthread_mutex_unlock(&g_clipboard_mutex);
+            return false;
+        }
 
         // 즉시 임시 파일 생성 (빈 파일/디렉토리) - 더 확실한 생성
         if (task->is_directory) {
             if (mkdir(dest_path, 0755) != 0 && errno != EEXIST) {
+                pthread_mutex_destroy(&task->progress_mutex);
                 free(task);
                 pthread_mutex_unlock(&g_clipboard_mutex);
                 return false;
@@ -701,6 +791,7 @@ bool paste_from_clipboard(const char *dest_dir) {
         } else {
             int fd = open(dest_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
             if (fd < 0) {
+                pthread_mutex_destroy(&task->progress_mutex);
                 free(task);
                 pthread_mutex_unlock(&g_clipboard_mutex);
                 return false;
@@ -716,6 +807,7 @@ bool paste_from_clipboard(const char *dest_dir) {
             } else {
                 unlink(dest_path);
             }
+            pthread_mutex_destroy(&task->progress_mutex);
             free(task);
             pthread_mutex_unlock(&g_clipboard_mutex);
             return false;

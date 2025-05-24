@@ -9,6 +9,8 @@
 #define COLOR_PAIR_REGULAR 1   // 일반 텍스트용 색상 쌍 ID
 #define COLOR_PAIR_HIGHLIGHT 2 // 선택된 항목 강조용 색상 쌍 ID
 #define COLOR_PAIR_FOOTER 3    // 하단 정보 표시용 색상 쌍 ID
+#define COLOR_PAIR_COPYING 4   // 복사 중 파일용 색상 쌍 ID (파란색)
+#define COLOR_PAIR_COPYING_SELECTED 5 // 복사 중이면서 선택된 상태용 색상 쌍 ID
 
 // 푸터 높이 정의
 #define FOOTER_HEIGHT_PATH 1

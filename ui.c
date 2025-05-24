@@ -26,17 +26,10 @@ void init_ui() {
             init_pair(COLOR_PAIR_REGULAR, COLOR_WHITE, COLOR_BLACK);     // 일반: 흰색 글씨, 검은색 배경
             init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK, COLOR_CYAN);    // 강조: 검은색 글씨, 시안색 배경
             init_pair(COLOR_PAIR_FOOTER, COLOR_YELLOW, COLOR_BLACK);     // 푸터: 노란색 글씨, 검은색 배경
-
-            // 복사 중 상태를 위한 색상 (더 명확하게)
-            if (can_change_color()) {
-                // 회색을 직접 정의할 수 있는 경우
-                init_pair(4, COLOR_BLACK, COLOR_BLACK);  // 어두운 회색 효과
-                init_pair(5, COLOR_WHITE, COLOR_BLUE);   // 복사 중 선택된 상태
-            } else {
-                // 기본 색상만 사용 가능한 경우
-                init_pair(4, COLOR_BLACK, COLOR_BLACK);  // 어두운 색상으로 회색 효과
-                init_pair(5, COLOR_WHITE, COLOR_BLUE);   // 복사 중 선택된 상태
-            }
+            
+            // 복사 중 상태를 위한 색상 정의
+            init_pair(COLOR_PAIR_COPYING, COLOR_BLUE, COLOR_BLACK);      // 복사 중: 파란색 글씨, 검은색 배경
+            init_pair(COLOR_PAIR_COPYING_SELECTED, COLOR_WHITE, COLOR_BLUE); // 복사 중 선택된 상태: 흰색 글씨, 파란색 배경
         }
     }
 
@@ -151,13 +144,14 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
 		// 복사 상태에 따른 색상 결정
 		int color_pair;
 		bool is_copying = (files[file_index].copy_status == COPY_STATUS_IN_PROGRESS);
+		bool is_selected = (file_index == current_selection);
 		
-		if (file_index == current_selection) {
+		if (is_selected) {
 			// 선택된 항목
 			if (is_copying) {
-				color_pair = 5; // 복사 중이면서 선택된 상태
+				color_pair = COLOR_PAIR_COPYING_SELECTED; // 복사 중이면서 선택된 상태 (흰색 글씨, 파란색 배경)
 			} else {
-				color_pair = COLOR_PAIR_HIGHLIGHT; // 일반 선택 상태
+				color_pair = COLOR_PAIR_HIGHLIGHT; // 일반 선택 상태 (검은색 글씨, 시안색 배경)
 			}
 			
 			// 먼저 전체 행에 색상 배경 적용
@@ -176,9 +170,9 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
 		} else {
 			// 선택되지 않은 항목
 			if (is_copying) {
-				color_pair = 4; // 복사 중 (회색)
+				color_pair = COLOR_PAIR_COPYING; // 복사 중 (파란색 글씨, 검은색 배경)
 			} else {
-				color_pair = COLOR_PAIR_REGULAR; // 일반 상태
+				color_pair = COLOR_PAIR_REGULAR; // 일반 상태 (흰색 글씨, 검은색 배경)
 			}
 			
 			wattron(main_win, COLOR_PAIR(color_pair));
