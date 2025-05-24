@@ -17,6 +17,8 @@ void init_ui() {
     cbreak();               // 버퍼링 없이 바로 입력 받도록 설정 (Enter 키 없이도 입력 처리)
     curs_set(0);            // 커서 숨기기
     keypad(stdscr, TRUE);   // 특수 키(화살표 키 등) 사용 가능하도록 설정
+	intrflush(stdscr, FALSE); // 인터럽트 키 무시
+	raw();                     // raw 모드로 변경 (모든 키 입력을 직접 받음)
 
     if (has_colors()) {     // 터미널이 색상 지원하는지 확인
         start_color();      // 색상 사용 시작

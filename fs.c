@@ -12,6 +12,16 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <libgen.h>
+#include <fcntl.h>
+#include <signal.h>
+
+Clipboard g_clipboard = {0};
+CopyTask* g_copy_tasks = NULL;
+pthread_mutex_t g_clipboard_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_tasks_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// SIGINT 핸들러 (Ctrl+C 무시)
+void sigint_handler(int sig) {}
 
 // 파일 확장자를 기반으로 프로그래밍 언어 타입 반환
 static const char* get_programming_language(const char *filename) {
@@ -291,5 +301,310 @@ bool edit_file(const char *path) {
         int status;
         waitpid(pid, &status, 0);
         return WIFEXITED(status); // 정상 종료 여부 반환
+    }
+}
+
+// 클립보드 시스템 초기화
+bool init_clipboard_system() {
+    // SIGINT 핸들러 등록하여 Ctrl+C 무시
+    signal(SIGINT, sigint_handler);
+
+    memset(&g_clipboard, 0, sizeof(Clipboard));
+    g_copy_tasks = NULL;
+    return true;
+}
+
+// 클립보드 시스템 정리
+void cleanup_clipboard_system() {
+    pthread_mutex_lock(&g_tasks_mutex);
+
+    // 모든 실행 중인 작업 정리
+    CopyTask* current = g_copy_tasks;
+    while (current) {
+        if (current->is_running) {
+            pthread_cancel(current->thread_id);
+            pthread_join(current->thread_id, NULL);
+        }
+        CopyTask* next = current->next;
+        free(current);
+        current = next;
+    }
+    g_copy_tasks = NULL;
+
+    pthread_mutex_unlock(&g_tasks_mutex);
+
+    // SIGINT 핸들러 복원
+    signal(SIGINT, SIG_DFL);
+}
+
+// 완료된 작업들 정리
+void cleanup_finished_tasks() {
+    pthread_mutex_lock(&g_tasks_mutex);
+
+    CopyTask** current = &g_copy_tasks;
+    while (*current) {
+        if (!(*current)->is_running) {
+            CopyTask* to_remove = *current;
+            *current = (*current)->next;
+            pthread_join(to_remove->thread_id, NULL);
+            free(to_remove);
+        } else {
+            current = &((*current)->next);
+        }
+    }
+
+    pthread_mutex_unlock(&g_tasks_mutex);
+}
+
+// 파일 크기 가져오기
+off_t get_file_size(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == -1) {
+        return -1;
+    }
+    return st.st_size;
+}
+
+// 백그라운드 복사가 필요한지 판단
+bool should_use_background_copy(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == -1) {
+        return false;
+    }
+
+    // 디렉토리이거나 100MB 이상인 파일
+    return S_ISDIR(st.st_mode) || st.st_size > LARGE_FILE_SIZE;
+}
+
+// 고유한 파일명 생성 (중복 시 (1), (2) 등 추가)
+char* generate_unique_name(const char *dest_dir, const char *base_name) {
+    static char unique_name[MAX_PATH_LEN];
+    char test_path[MAX_PATH_LEN];
+
+    // 원본 이름 시도
+    snprintf(test_path, sizeof(test_path), "%s/%s", dest_dir, base_name);
+    if (access(test_path, F_OK) != 0) {
+        strcpy(unique_name, base_name);
+        return unique_name;
+    }
+
+    // (1), (2), ... 형태로 시도
+    for (int i = 1; i < 1000; i++) {
+        const char *ext = strrchr(base_name, '.');
+        if (ext) {
+            // 확장자가 있는 경우
+            int name_len = ext - base_name;
+            snprintf(unique_name, sizeof(unique_name), "%.*s(%d)%s", name_len, base_name, i, ext);
+        } else {
+            // 확장자가 없는 경우
+            snprintf(unique_name, sizeof(unique_name), "%s(%d)", base_name, i);
+        }
+
+        snprintf(test_path, sizeof(test_path), "%s/%s", dest_dir, unique_name);
+        if (access(test_path, F_OK) != 0) {
+            return unique_name;
+        }
+    }
+
+    // 1000개까지 시도해도 안되면 원본 이름 반환
+    strcpy(unique_name, base_name);
+    return unique_name;
+}
+
+// 동기 파일 복사
+bool copy_file_sync(const char *src, const char *dest) {
+    int src_fd = open(src, O_RDONLY);
+    if (src_fd == -1) {
+        return false;
+    }
+
+    int dest_fd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (dest_fd == -1) {
+        close(src_fd);
+        return false;
+    }
+
+    char buffer[8192];
+    ssize_t bytes_read, bytes_written;
+
+    while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
+        bytes_written = write(dest_fd, buffer, bytes_read);
+        if (bytes_written != bytes_read) {
+            close(src_fd);
+            close(dest_fd);
+            unlink(dest);
+            return false;
+        }
+    }
+
+    close(src_fd);
+    close(dest_fd);
+
+    // 원본 파일의 권한 복사
+    struct stat st;
+    if (stat(src, &st) == 0) {
+        chmod(dest, st.st_mode);
+    }
+
+    return bytes_read == 0;
+}
+
+// 동기 디렉토리 복사
+bool copy_directory_sync(const char *src, const char *dest) {
+    // 대상 디렉토리 생성
+    if (mkdir(dest, 0755) == -1 && errno != EEXIST) {
+        return false;
+    }
+
+    DIR *dir = opendir(src);
+    if (!dir) {
+        return false;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        char src_path[MAX_PATH_LEN];
+        char dest_path[MAX_PATH_LEN];
+        snprintf(src_path, sizeof(src_path), "%s/%s", src, entry->d_name);
+        snprintf(dest_path, sizeof(dest_path), "%s/%s", dest, entry->d_name);
+
+        struct stat st;
+        if (lstat(src_path, &st) == -1) {
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            if (!copy_directory_sync(src_path, dest_path)) {
+                closedir(dir);
+                return false;
+            }
+        } else {
+            if (!copy_file_sync(src_path, dest_path)) {
+                closedir(dir);
+                return false;
+            }
+        }
+    }
+
+    closedir(dir);
+    return true;
+}
+
+// 백그라운드 복사 스레드 함수
+void* copy_thread_func(void* arg) {
+    CopyTask* task = (CopyTask*)arg;
+
+    bool success;
+    if (task->is_directory) {
+        success = copy_directory_sync(task->source_path, task->dest_path);
+    } else {
+        success = copy_file_sync(task->source_path, task->dest_path);
+    }
+
+    // 작업 완료 표시
+    task->is_running = false;
+
+    return NULL;
+}
+
+// 클립보드에 복사
+bool copy_to_clipboard(const char *file_path) {
+    pthread_mutex_lock(&g_clipboard_mutex);
+
+    // 절대 경로로 변환
+    char abs_path[MAX_PATH_LEN];
+    if (file_path[0] != '/') {
+        char cwd[MAX_PATH_LEN];
+        if (getcwd(cwd, sizeof(cwd))) {
+            snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd, file_path);
+        } else {
+            pthread_mutex_unlock(&g_clipboard_mutex);
+            return false;
+        }
+    } else {
+        strncpy(abs_path, file_path, sizeof(abs_path) - 1);
+        abs_path[sizeof(abs_path) - 1] = '\0';
+    }
+
+    // 파일/디렉토리 존재 확인
+    struct stat st;
+    if (stat(abs_path, &st) == -1) {
+        pthread_mutex_unlock(&g_clipboard_mutex);
+        return false;
+    }
+
+    // 클립보드에 저장
+    strncpy(g_clipboard.source_path, abs_path, sizeof(g_clipboard.source_path) - 1);
+    g_clipboard.source_path[sizeof(g_clipboard.source_path) - 1] = '\0';
+    g_clipboard.is_valid = true;
+    g_clipboard.is_directory = S_ISDIR(st.st_mode);
+
+    pthread_mutex_unlock(&g_clipboard_mutex);
+    return true;
+}
+
+// 클립보드에서 붙여넣기
+bool paste_from_clipboard(const char *dest_dir) {
+    pthread_mutex_lock(&g_clipboard_mutex);
+
+    if (!g_clipboard.is_valid) {
+        pthread_mutex_unlock(&g_clipboard_mutex);
+        return false;
+    }
+
+    // 원본 파일 이름 추출
+    char *base_name = basename(g_clipboard.source_path);
+    char *unique_name = generate_unique_name(dest_dir, base_name);
+
+    char dest_path[MAX_PATH_LEN];
+    snprintf(dest_path, sizeof(dest_path), "%s/%s", dest_dir, unique_name);
+
+    bool use_background = should_use_background_copy(g_clipboard.source_path);
+
+    if (use_background) {
+        // 백그라운드 복사 작업 생성
+        CopyTask* task = malloc(sizeof(CopyTask));
+        if (!task) {
+            pthread_mutex_unlock(&g_clipboard_mutex);
+            return false;
+        }
+
+        strncpy(task->source_path, g_clipboard.source_path, sizeof(task->source_path) - 1);
+        task->source_path[sizeof(task->source_path) - 1] = '\0';
+        strncpy(task->dest_path, dest_path, sizeof(task->dest_path) - 1);
+        task->dest_path[sizeof(task->dest_path) - 1] = '\0';
+        task->is_directory = g_clipboard.is_directory;
+        task->is_running = true;
+
+        // 스레드 생성
+        if (pthread_create(&task->thread_id, NULL, copy_thread_func, task) != 0) {
+            free(task);
+            pthread_mutex_unlock(&g_clipboard_mutex);
+            return false;
+        }
+
+        // 작업 목록에 추가
+        pthread_mutex_lock(&g_tasks_mutex);
+        task->next = g_copy_tasks;
+        g_copy_tasks = task;
+        pthread_mutex_unlock(&g_tasks_mutex);
+
+        pthread_mutex_unlock(&g_clipboard_mutex);
+        return true;
+    } else {
+        // 동기 복사
+        bool success;
+        if (g_clipboard.is_directory) {
+            success = copy_directory_sync(g_clipboard.source_path, dest_path);
+        } else {
+            success = copy_file_sync(g_clipboard.source_path, dest_path);
+        }
+
+        pthread_mutex_unlock(&g_clipboard_mutex);
+        return success;
     }
 }

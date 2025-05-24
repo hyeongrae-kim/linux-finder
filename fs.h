@@ -4,10 +4,12 @@
 
 #include <stdbool.h>
 #include <sys/types.h>
+#include <pthread.h>
 
 #define MAX_FILES 1024
 #define MAX_NAME_LEN 256
 #define MAX_PATH_LEN 1024
+#define LARGE_FILE_SIZE (100 * 1024 * 1024) // 100MB
 
 // fs.h 구조체 필드 크기 수정
 typedef struct {
@@ -18,15 +20,28 @@ typedef struct {
     mode_t mode;              // 파일 모드
 } FileEntry;
 
-/*
+// 클립보드 구조체
 typedef struct {
-    char name[MAX_NAME_LEN];  // 파일 이름
-    char type[16];            // 파일 종류 (예: "디렉토리", "일반 파일")
-    char mtime[20];           // 수정일 (예: "2025-05-02")
-    char size[16];            // 파일 크기 (예: "1.2KB")
-    mode_t mode;              // 파일 모드 (파일 유형 및 권한 확인용)
-} FileEntry;
-*/
+    char source_path[MAX_PATH_LEN];  // 복사할 파일/디렉토리의 절대 경로
+    bool is_valid;                   // 클립보드에 유효한 데이터가 있는지
+    bool is_directory;               // 복사 대상이 디렉토리인지 여부
+} Clipboard;
+
+// 백그라운드 복사 작업 정보
+typedef struct {
+    char source_path[MAX_PATH_LEN];
+    char dest_path[MAX_PATH_LEN];
+    bool is_directory;
+    pthread_t thread_id;
+    bool is_running;
+    struct CopyTask* next;  // 연결 리스트로 여러 작업 관리
+} CopyTask;
+
+// 전역 클립보드 및 작업 목록
+extern Clipboard g_clipboard;
+extern CopyTask* g_copy_tasks;
+extern pthread_mutex_t g_clipboard_mutex;
+extern pthread_mutex_t g_tasks_mutex;
 
 // 파일 목록 가져오기 함수
 int get_file_list(const char *path, FileEntry *files, int max_files);
@@ -54,5 +69,18 @@ bool is_directory(const FileEntry *file);
 
 // 파일을 편집기로 여는 함수
 bool edit_file(const char *path);
+
+// 복사-붙여넣기 관련 함수들
+bool copy_to_clipboard(const char *file_path);
+bool paste_from_clipboard(const char *dest_dir);
+bool init_clipboard_system();
+void cleanup_clipboard_system();
+void cleanup_finished_tasks();
+char* generate_unique_name(const char *dest_dir, const char *base_name);
+off_t get_file_size(const char *path);
+bool copy_file_sync(const char *src, const char *dest);
+bool copy_directory_sync(const char *src, const char *dest);
+void* copy_thread_func(void* arg);
+bool should_use_background_copy(const char *path);
 
 #endif
