@@ -9,6 +9,8 @@
 #define COLOR_PAIR_REGULAR 1   // 일반 텍스트용 색상 쌍 ID
 #define COLOR_PAIR_HIGHLIGHT 2 // 선택된 항목 강조용 색상 쌍 ID
 #define COLOR_PAIR_FOOTER 3    // 하단 정보 표시용 색상 쌍 ID
+#define COLOR_PAIR_COPYING 4   // 복사 중 파일용 색상 쌍 ID (파란색)
+#define COLOR_PAIR_COPYING_SELECTED 5 // 복사 중이면서 선택된 상태용 색상 쌍 ID
 
 // 푸터 높이 정의
 #define FOOTER_HEIGHT_PATH 1
@@ -70,5 +72,19 @@ void refresh_screen();
  * @brief 터미널 크기 변경 시 UI 윈도우를 재구성합니다.
  */
 void resize_ui();
+
+// 추가할 함수들
+
+// 확인 다이얼로그 표시
+bool ui_show_confirmation_dialog(const char* message);
+
+// 임시 메시지 표시
+void ui_display_temporary_message(const char* message, bool is_error);
+
+// 복사 진행률 표시
+void ui_display_copy_progress(CopyTask* task);
+
+// 복사 작업 취소 확인
+bool ui_confirm_cancel_copy(const char* filename);
 
 #endif // UI_H

@@ -14,16 +14,23 @@ void init_ui() {
     initscr();              // ncurses 모드 시작
     clear();                // 화면 지우기
     noecho();               // 입력한 문자가 화면에 바로 보이지 않도록 설정
-    cbreak();               // 버퍼링 없이 바로 입력 받도록 설정 (Enter 키 없이도 입력 처리)
+    raw();                  // cbreak() 대신 raw() 사용 - Ctrl 키 조합을 위해 필요
     curs_set(0);            // 커서 숨기기
     keypad(stdscr, TRUE);   // 특수 키(화살표 키 등) 사용 가능하도록 설정
+    intrflush(stdscr, FALSE); // 인터럽트 키 무시 - Ctrl+C가 프로그램을 종료시키지 않도록
 
     if (has_colors()) {     // 터미널이 색상 지원하는지 확인
         start_color();      // 색상 사용 시작
-        // 색상 쌍 초기화: (ID, 전경색, 배경색)
-        init_pair(COLOR_PAIR_REGULAR, COLOR_WHITE, COLOR_BLACK);     // 일반: 흰색 글씨, 검은색 배경
-        init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK, COLOR_CYAN);    // 강조: 검은색 글씨, 시안색 배경 (예시)
-        init_pair(COLOR_PAIR_FOOTER, COLOR_YELLOW, COLOR_BLACK);     // 푸터: 노란색 글씨, 검은색 배경
+		if (COLORS >= 8) {
+            // 색상 쌍 초기화: (ID, 전경색, 배경색)
+            init_pair(COLOR_PAIR_REGULAR, COLOR_WHITE, COLOR_BLACK);     // 일반: 흰색 글씨, 검은색 배경
+            init_pair(COLOR_PAIR_HIGHLIGHT, COLOR_BLACK, COLOR_CYAN);    // 강조: 검은색 글씨, 시안색 배경
+            init_pair(COLOR_PAIR_FOOTER, COLOR_YELLOW, COLOR_BLACK);     // 푸터: 노란색 글씨, 검은색 배경
+            
+            // 복사 중 상태를 위한 색상 정의
+            init_pair(COLOR_PAIR_COPYING, COLOR_BLUE, COLOR_BLACK);      // 복사 중: 파란색 글씨, 검은색 배경
+            init_pair(COLOR_PAIR_COPYING_SELECTED, COLOR_WHITE, COLOR_BLUE); // 복사 중 선택된 상태: 흰색 글씨, 파란색 배경
+        }
     }
 
     int screen_rows, screen_cols;
@@ -112,59 +119,73 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
     mtime_col_width -= 1;
     // size_col_width는 남은 공간을 모두 사용
 
-    // 헤더(컬럼명) 출력
-    wattron(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR)); // 굵게, 일반 색상 적용
-    mvwprintw(main_win, 0, 0, "%-*s %-*s %-*s %s",
-              name_col_width, "Name",
-              type_col_width - 4, "Type",
-              mtime_col_width, "Modified",
-              "Size"); // Size 컬럼은 남은 공간을 사용하므로 %-*s 대신 %s
-    wattroff(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR)); // 속성 해제
+	// 각 컬럼의 시작 위치 계산
+	int col1 = 0;
+	int col2 = name_col_width + 1;
+	int col3 = col2 + type_col_width + 1;
+	int col4 = col3 + mtime_col_width + 1;
+	
+	// 헤더 출력
+	wattron(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR));
+	mvwprintw(main_win, 0, col1, "%-*s", name_col_width, "Name");
+	mvwprintw(main_win, 0, col2, "%-*s", type_col_width, "Type");
+	mvwprintw(main_win, 0, col3, "%-*s", mtime_col_width, "Modified");
+	mvwprintw(main_win, 0, col4, "Size");
+	wattroff(main_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_REGULAR));
 
-    // 화면에 표시될 수 있는 파일들만 루프 (스크롤 오프셋과 윈도우 높이 고려)
-    for (int i = 0; i < window_height && (i + scroll_offset) < num_files; ++i) {
-        int file_index = i + scroll_offset; // 실제 파일 배열에서의 인덱스
-        if (file_index >= num_files) break; // 파일 개수 초과 시 중단
+	// 화면에 표시될 수 있는 파일들만 루프
+	for (int i = 0; i < window_height && (i + scroll_offset) < num_files; ++i) {
+		int file_index = i + scroll_offset;
+		if (file_index >= num_files) break;
 
-        int display_row = i + 1; // 헤더 다음 줄부터 파일 정보 표시
-        if (display_row >= max_y) break; // 윈도우 높이 초과 시 중단 (실제 사용 가능 높이는 window_height지만 안전하게 체크)
+		int display_row = i + 1; // 헤더 다음 줄부터 파일 정보 표시
+		if (display_row >= max_y) break;
 
-        // 현재 선택된 항목이면 강조 색상 적용
-        if (file_index == current_selection) {
-            wattron(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT)); // 강조 색상 적용
-        } else {
-            wattron(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));   // 일반 색상 적용
-        }
+		// 복사 상태에 따른 색상 결정
+		int color_pair;
+		bool is_copying = (files[file_index].copy_status == COPY_STATUS_IN_PROGRESS);
+		bool is_selected = (file_index == current_selection);
+		
+		if (is_selected) {
+			// 선택된 항목
+			if (is_copying) {
+				color_pair = COLOR_PAIR_COPYING_SELECTED; // 복사 중이면서 선택된 상태 (흰색 글씨, 파란색 배경)
+			} else {
+				color_pair = COLOR_PAIR_HIGHLIGHT; // 일반 선택 상태 (검은색 글씨, 시안색 배경)
+			}
+			
+			// 먼저 전체 행에 색상 배경 적용
+			wattron(main_win, COLOR_PAIR(color_pair));
+			// 행 전체를 공백으로 채워 배경색 적용
+			for (int x = 0; x < max_x; x++) {
+				mvwaddch(main_win, display_row, x, ' ');
+			}
 
-        // 필드 내용이 너무 길 경우 자르기 위한 임시 버퍼 (컬럼 너비 + null 종료 문자)
-        char name_display[name_col_width + 1];
-        char type_display[type_col_width + 1];
-        char mtime_display[mtime_col_width + 1];
-        char size_display[size_col_width + 1]; // Size는 남은 공간 전부 사용
+			// 이제 텍스트 출력
+			mvwprintw(main_win, display_row, col1, "%-*s", name_col_width, files[file_index].name);
+			mvwprintw(main_win, display_row, col2, "%-*s", type_col_width, files[file_index].type);
+			mvwprintw(main_win, display_row, col3, "%-*s", mtime_col_width, files[file_index].mtime);
+			mvwprintw(main_win, display_row, col4, "%s", files[file_index].size);
+			wattroff(main_win, COLOR_PAIR(color_pair));
+		} else {
+			// 선택되지 않은 항목
+			if (is_copying) {
+				color_pair = COLOR_PAIR_COPYING; // 복사 중 (파란색 글씨, 검은색 배경)
+			} else {
+				color_pair = COLOR_PAIR_REGULAR; // 일반 상태 (흰색 글씨, 검은색 배경)
+			}
+			
+			wattron(main_win, COLOR_PAIR(color_pair));
+			mvwprintw(main_win, display_row, col1, "%-*s", name_col_width, files[file_index].name);
+			mvwprintw(main_win, display_row, col2, "%-*s", type_col_width, files[file_index].type);
+			mvwprintw(main_win, display_row, col3, "%-*s", mtime_col_width, files[file_index].mtime);
+			mvwprintw(main_win, display_row, col4, "%s", files[file_index].size);
+			wattroff(main_win, COLOR_PAIR(color_pair));
+		}
+	}
 
-        // 각 필드 내용을 컬럼 너비에 맞게 자르거나 형식화
-        snprintf(name_display, sizeof(name_display), "%.*s", name_col_width, files[file_index].name);
-        snprintf(type_display, sizeof(type_display), "%.*s", type_col_width, files[file_index].type);
-        snprintf(mtime_display, sizeof(mtime_display), "%.*s", mtime_col_width, files[file_index].mtime);
-        snprintf(size_display, sizeof(size_display), "%.*s", size_col_width, files[file_index].size);
-
-        // 파일 정보 출력 (각 컬럼 너비에 맞춰 왼쪽 정렬하여 출력)
-        mvwprintw(main_win, display_row, 0, "%-*s %-*s %-*s %s", // %-*s 사용
-                  name_col_width, name_display,
-                  type_col_width, type_display,
-                  mtime_col_width, mtime_display,
-                  size_display); // size_display는 남은 공간이므로 너비 지정 안 함
-
-        // 적용했던 색상 속성 해제
-        if (file_index == current_selection) {
-            wattroff(main_win, COLOR_PAIR(COLOR_PAIR_HIGHLIGHT));
-        } else {
-            wattroff(main_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
-        }
-    }
     wrefresh(main_win); // 메인 윈도우 변경 사항 화면에 반영
 }
-
 
 void display_footer(const char* current_path, int num_items_in_dir, const char* disk_free_space) {
     if (!footer_win_path || !footer_win_stats) return; // 푸터 윈도우가 없으면 함수 종료
@@ -262,9 +283,179 @@ void resize_ui() {
     // display_files()와 display_footer() 함수를 다시 호출하여 그려야 합니다.
 }
 
-
 void refresh_screen() {
     // 모든 윈도우의 변경 사항을 효율적으로 화면에 반영합니다.
     doupdate();
     // 개별 wrefresh 호출 방식도 가능하지만, doupdate가 일반적으로 더 효율적입니다.
+}
+
+// 확인 다이얼로그 표시 함수
+bool ui_show_confirmation_dialog(const char* message) {
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    // 다이얼로그 크기 및 위치 계산
+    int dialog_width = screen_cols / 2;
+    if (dialog_width < 40) dialog_width = screen_cols - 4; // 최소 너비 보장
+    if (dialog_width > screen_cols - 4) dialog_width = screen_cols - 4;
+    
+    int dialog_height = 5;
+    int start_y = (screen_rows - dialog_height) / 2;
+    int start_x = (screen_cols - dialog_width) / 2;
+    
+    // 다이얼로그 창 생성
+    WINDOW *dialog_win = newwin(dialog_height, dialog_width, start_y, start_x);
+    if (!dialog_win) return false;
+    
+    // 테두리 설정 및 배경색 설정
+    box(dialog_win, 0, 0);
+    wbkgd(dialog_win, COLOR_PAIR(COLOR_PAIR_FOOTER));
+    
+    // 메시지 및 안내 표시
+    mvwprintw(dialog_win, 1, 2, "%s", message);
+    mvwprintw(dialog_win, 3, 2, "확인: Enter, 취소: ESC");
+    
+    wrefresh(dialog_win);
+    
+    // 입력 처리
+    keypad(dialog_win, TRUE);
+    noecho();
+    curs_set(0);
+    
+    int ch;
+    bool result = false;
+    
+    // 다이얼로그 입력 대기 루프
+    while (1) {
+        ch = wgetch(dialog_win);
+        
+        if (ch == '\n' || ch == KEY_ENTER) { // 확인 (Enter)
+            result = true;
+            break;
+        } else if (ch == 27 || ch == KEY_MESSAGE || ch == 'n' || ch == 'N') { // 취소 (ESC, n)
+            result = false;
+            break;
+        }
+    }
+    
+    // 윈도우 정리 및 화면 갱신
+    delwin(dialog_win);
+    touchwin(stdscr);
+    refresh();
+    
+    return result;
+}
+
+// 임시 메시지 표시 함수
+void ui_display_temporary_message(const char* message, bool is_error) {
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    // 메시지 창 크기 및 위치 계산
+    int msg_width = strlen(message) + 4;
+    if (msg_width > screen_cols - 4) msg_width = screen_cols - 4;
+    if (msg_width < 20) msg_width = 20;
+    
+    int msg_height = 3;
+    int start_y = (screen_rows - msg_height) / 2;
+    int start_x = (screen_cols - msg_width) / 2;
+    
+    // 메시지 창 생성
+    WINDOW *msg_win = newwin(msg_height, msg_width, start_y, start_x);
+    if (!msg_win) return;
+    
+    // 테두리 설정 및 배경색 설정
+    box(msg_win, 0, 0);
+    
+    if (is_error) {
+        wattron(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_COPYING)); // 에러는 파란색으로
+    } else {
+        wattron(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_FOOTER)); // 일반 메시지는 노란색으로
+    }
+    
+    // 메시지 중앙 정렬
+    int msg_len = strlen(message);
+    int msg_x = (msg_width - msg_len) / 2;
+    if (msg_x < 1) msg_x = 1;
+    
+    mvwprintw(msg_win, 1, msg_x, "%s", message);
+    
+    if (is_error) {
+        wattroff(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_COPYING));
+    } else {
+        wattroff(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_FOOTER));
+    }
+    
+    wrefresh(msg_win);
+    
+    // 일정 시간 후 메시지 창 제거
+    napms(1500); // 1.5초 대기
+    
+    // 윈도우 정리 및 화면 갱신
+    delwin(msg_win);
+    touchwin(stdscr);
+    refresh();
+}
+
+// 복사 진행률 표시 함수
+void ui_display_copy_progress(CopyTask* task) {
+    if (!task) return;
+    
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    // 진행률 창 크기 및 위치 계산
+    int progress_width = screen_cols / 2;
+    if (progress_width < 40) progress_width = screen_cols - 4;
+    if (progress_width > screen_cols - 4) progress_width = screen_cols - 4;
+    
+    int progress_height = 5;
+    int start_y = screen_rows - progress_height - 2;
+    int start_x = (screen_cols - progress_width) / 2;
+    
+    // 진행률 창 생성
+    WINDOW *progress_win = newwin(progress_height, progress_width, start_y, start_x);
+    if (!progress_win) return;
+    
+    // 테두리 설정 및 배경색 설정
+    box(progress_win, 0, 0);
+    wbkgd(progress_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
+    
+    // 파일 이름 및 상태 표시
+    mvwprintw(progress_win, 1, 2, "복사 중: %s", task->dest_name);
+    
+    // 진행률 계산
+    pthread_mutex_lock(&task->progress_mutex);
+    double progress_percent = 0.0;
+    if (task->total_size > 0) {
+        progress_percent = (double)task->copied_size / task->total_size * 100.0;
+    }
+    pthread_mutex_unlock(&task->progress_mutex);
+    
+    // 진행률 막대 표시
+    int bar_width = progress_width - 10;
+    int filled_width = (int)(bar_width * progress_percent / 100.0);
+    
+    mvwprintw(progress_win, 2, 2, "[");
+    for (int i = 0; i < bar_width; i++) {
+        if (i < filled_width) {
+            waddch(progress_win, '=');
+        } else {
+            waddch(progress_win, ' ');
+        }
+    }
+    wprintw(progress_win, "] %.1f%%", progress_percent);
+    
+    // 취소 안내 표시
+    mvwprintw(progress_win, 3, 2, "취소: ESC");
+    
+    wrefresh(progress_win);
+    delwin(progress_win);
+}
+
+// 복사 작업 취소 확인 함수
+bool ui_confirm_cancel_copy(const char* filename) {
+    char message[MAX_PATH_LEN + 30];
+    snprintf(message, sizeof(message), "'%s' 복사를 취소하시겠습니까?", filename);
+    return ui_show_confirmation_dialog(message);
 }
