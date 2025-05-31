@@ -834,3 +834,75 @@ bool paste_from_clipboard(const char *dest_dir) {
         return success;
     }
 }
+
+// 파일 삭제 함수
+bool delete_file(const char *path) {
+    // 파일이 존재하는지 확인
+    if (access(path, F_OK) != 0) {
+        return false; // 파일이 존재하지 않음
+    }
+
+    // 파일이 실제로 디렉토리인지 확인
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return delete_directory_recursive(path); // 디렉토리면 재귀적으로 삭제
+    }
+
+    // 일반 파일 삭제
+    if (unlink(path) != 0) {
+        return false; // 삭제 실패
+    }
+
+    return true; // 삭제 성공
+}
+
+// 디렉토리 재귀적으로 삭제하는 함수
+bool delete_directory_recursive(const char *path) {
+    DIR *dir;
+    struct dirent *entry;
+    char full_path[MAX_PATH_LEN];
+    
+    // ".." 디렉토리는 삭제 불가능 처리
+    const char *last_part = strrchr(path, '/');
+    if (last_part && strcmp(last_part + 1, "..") == 0) {
+        return false;
+    }
+
+    // 디렉토리 열기
+    dir = opendir(path);
+    if (!dir) {
+        return false;
+    }
+
+    // 디렉토리 내 모든 파일/디렉토리 순회하며 삭제
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue; // . 과 .. 건너뛰기
+        }
+
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+        
+        // 디렉토리면 재귀 호출
+        if (entry->d_type == DT_DIR) {
+            if (!delete_directory_recursive(full_path)) {
+                closedir(dir);
+                return false; // 하위 디렉토리 삭제 실패
+            }
+        } else {
+            // 일반 파일 삭제
+            if (unlink(full_path) != 0) {
+                closedir(dir);
+                return false; // 파일 삭제 실패
+            }
+        }
+    }
+
+    closedir(dir);
+    
+    // 비어있는 디렉토리 삭제
+    if (rmdir(path) != 0) {
+        return false; // 디렉토리 삭제 실패
+    }
+
+    return true; // 성공
+}

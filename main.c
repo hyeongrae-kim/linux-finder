@@ -49,6 +49,18 @@ int main() {
         display_files(files, file_count, current_selection, scroll_offset);
         display_footer(current_path, file_count, disk_free);
 
+        // 복사 작업 진행률 표시
+        pthread_mutex_lock(&g_tasks_mutex);
+        CopyTask* current = g_copy_tasks;
+        while (current) {
+            if (current->is_running) {
+                ui_display_copy_progress(current);
+                break; // 첫 번째 진행 중인 작업만 표시
+            }
+            current = current->next;
+        }
+        pthread_mutex_unlock(&g_tasks_mutex);
+
         ch = getch(); // 사용자 입력 받기 (비블로킹 모드)
 
         // 입력이 없으면 (ERR 반환) 짧은 대기 후 다시 루프
@@ -66,7 +78,14 @@ int main() {
             if (current_selection >= 0 && current_selection < file_count) {
                 char selected_path[MAX_PATH_LEN];
                 snprintf(selected_path, sizeof(selected_path), "%s/%s", current_path, files[current_selection].name);
-                copy_to_clipboard(selected_path);
+                // copy_to_clipboard(selected_path);
+                if (copy_to_clipboard(selected_path)) {
+                    // 성공 메시지 추가
+                    // ui_display_temporary_message("클립보드에 복사됨", false);
+                } else {
+                    // 실패 메시지 추가
+                    ui_display_temporary_message("복사 실패", true);
+                }
             }
             continue;
         }
@@ -75,8 +94,14 @@ int main() {
         if (ch == 22) { // Ctrl+V의 ASCII 코드
             if (paste_from_clipboard(current_path)) {
                 // 붙여넣기 성공 - 파일 목록 즉시 갱신
+                // file_count = get_file_list(current_path, files, MAX_FILES);
+				// update_file_copy_status(files, file_count, current_path);
+
+                // ui_display_temporary_message("붙여넣기 시작", false);
                 file_count = get_file_list(current_path, files, MAX_FILES);
-				update_file_copy_status(files, file_count, current_path);
+                update_file_copy_status(files, file_count, current_path);
+            } else {
+                ui_display_temporary_message("붙여넣기 실패", true);
             }
             continue;
         }
@@ -269,6 +294,94 @@ int main() {
                     scroll_offset = 0;
                 }
                 break;
+                
+            case 'd':
+            case 'D':
+                if (current_selection >= 0 && current_selection < file_count) {
+                    // 현재 선택된 파일/디렉토리의 전체 경로 생성
+                    char full_path[MAX_PATH_LEN];
+                    snprintf(full_path, sizeof(full_path), "%s/%s", current_path, files[current_selection].name);
+                    
+                    // ".." 디렉토리는 삭제 불가
+                    if (strcmp(files[current_selection].name, "..") == 0) {
+                        ui_display_temporary_message("상위 디렉토리는 삭제할 수 없습니다.", true);
+                        break;
+                    }
+                    
+                    char confirm_msg[MAX_PATH_LEN + 50];
+                    if (is_directory(&files[current_selection])) {
+                        snprintf(confirm_msg, sizeof(confirm_msg), "디렉토리 '%s'를 삭제하시겠습니까?", files[current_selection].name);
+                    } else {
+                        snprintf(confirm_msg, sizeof(confirm_msg), "파일 '%s'를 삭제하시겠습니까?", files[current_selection].name);
+                    }
+                    
+                    // 사용자에게 삭제 확인 요청
+                    if (ui_show_confirmation_dialog(confirm_msg)) {
+                        // 사용자가 확인한 경우, 삭제 진행
+                        if (delete_file(full_path)) {
+                            // ui_display_temporary_message("삭제 완료", false);
+                            
+                            // 파일 목록 다시 불러오기
+                            file_count = get_file_list(current_path, files, MAX_FILES);
+                            
+                            // 선택된 항목이 마지막 항목이었고, 삭제되었다면 인덱스 조정
+                            if (current_selection >= file_count) {
+                                current_selection = file_count - 1;
+                                if (current_selection < 0) current_selection = 0;
+                            }
+                            
+                            // 파일 목록 다시 표시
+                            display_files(files, file_count, current_selection, scroll_offset);
+                            
+                            // 푸터 정보 업데이트
+                            char disk_free[32];
+                            get_disk_free_space(current_path, disk_free, sizeof(disk_free));
+                            display_footer(current_path, file_count, disk_free);
+                        } else {
+                            ui_display_temporary_message("삭제 실패", true);
+                        }
+                    }
+                }
+                break;
+        }
+        
+        // ESC 키 처리 (복사 작업 취소)
+        if (ch == 27) { // ESC의 ASCII 코드
+            pthread_mutex_lock(&g_tasks_mutex);
+            CopyTask* current = g_copy_tasks;
+            bool found_running_task = false;
+            
+            while (current) {
+                if (current->is_running) {
+                    found_running_task = true;
+                    if (ui_confirm_cancel_copy(current->dest_name)) {
+                        pthread_cancel(current->thread_id);
+                        pthread_join(current->thread_id, NULL);
+                        
+                        // 대상 파일 삭제
+                        if (current->is_directory) {
+                            delete_directory_recursive(current->dest_path);
+                        } else {
+                            unlink(current->dest_path);
+                        }
+                        
+                        current->is_running = false;
+                        ui_display_temporary_message("복사 작업 취소됨", false);
+                        
+                        // 파일 목록 갱신
+                        file_count = get_file_list(current_path, files, MAX_FILES);
+                        break;
+                    }
+                }
+                current = current->next;
+            }
+            
+            pthread_mutex_unlock(&g_tasks_mutex);
+            
+            if (!found_running_task) {
+                // 일반 ESC 키 처리 - 추가적인 동작 정의 가능
+            }
+            continue;
         }
         
         // 스크롤 오프셋과 선택 범위 유효성 검사

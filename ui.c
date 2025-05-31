@@ -288,3 +288,174 @@ void refresh_screen() {
     doupdate();
     // 개별 wrefresh 호출 방식도 가능하지만, doupdate가 일반적으로 더 효율적입니다.
 }
+
+// 확인 다이얼로그 표시 함수
+bool ui_show_confirmation_dialog(const char* message) {
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    // 다이얼로그 크기 및 위치 계산
+    int dialog_width = screen_cols / 2;
+    if (dialog_width < 40) dialog_width = screen_cols - 4; // 최소 너비 보장
+    if (dialog_width > screen_cols - 4) dialog_width = screen_cols - 4;
+    
+    int dialog_height = 5;
+    int start_y = (screen_rows - dialog_height) / 2;
+    int start_x = (screen_cols - dialog_width) / 2;
+    
+    // 다이얼로그 창 생성
+    WINDOW *dialog_win = newwin(dialog_height, dialog_width, start_y, start_x);
+    if (!dialog_win) return false;
+    
+    // 테두리 설정 및 배경색 설정
+    box(dialog_win, 0, 0);
+    wbkgd(dialog_win, COLOR_PAIR(COLOR_PAIR_FOOTER));
+    
+    // 메시지 및 안내 표시
+    mvwprintw(dialog_win, 1, 2, "%s", message);
+    mvwprintw(dialog_win, 3, 2, "확인: Enter, 취소: ESC");
+    
+    wrefresh(dialog_win);
+    
+    // 입력 처리
+    keypad(dialog_win, TRUE);
+    noecho();
+    curs_set(0);
+    
+    int ch;
+    bool result = false;
+    
+    // 다이얼로그 입력 대기 루프
+    while (1) {
+        ch = wgetch(dialog_win);
+        
+        if (ch == '\n' || ch == KEY_ENTER) { // 확인 (Enter)
+            result = true;
+            break;
+        } else if (ch == 27 || ch == KEY_MESSAGE || ch == 'n' || ch == 'N') { // 취소 (ESC, n)
+            result = false;
+            break;
+        }
+    }
+    
+    // 윈도우 정리 및 화면 갱신
+    delwin(dialog_win);
+    touchwin(stdscr);
+    refresh();
+    
+    return result;
+}
+
+// 임시 메시지 표시 함수
+void ui_display_temporary_message(const char* message, bool is_error) {
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    // 메시지 창 크기 및 위치 계산
+    int msg_width = strlen(message) + 4;
+    if (msg_width > screen_cols - 4) msg_width = screen_cols - 4;
+    if (msg_width < 20) msg_width = 20;
+    
+    int msg_height = 3;
+    int start_y = (screen_rows - msg_height) / 2;
+    int start_x = (screen_cols - msg_width) / 2;
+    
+    // 메시지 창 생성
+    WINDOW *msg_win = newwin(msg_height, msg_width, start_y, start_x);
+    if (!msg_win) return;
+    
+    // 테두리 설정 및 배경색 설정
+    box(msg_win, 0, 0);
+    
+    if (is_error) {
+        wattron(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_COPYING)); // 에러는 파란색으로
+    } else {
+        wattron(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_FOOTER)); // 일반 메시지는 노란색으로
+    }
+    
+    // 메시지 중앙 정렬
+    int msg_len = strlen(message);
+    int msg_x = (msg_width - msg_len) / 2;
+    if (msg_x < 1) msg_x = 1;
+    
+    mvwprintw(msg_win, 1, msg_x, "%s", message);
+    
+    if (is_error) {
+        wattroff(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_COPYING));
+    } else {
+        wattroff(msg_win, A_BOLD | COLOR_PAIR(COLOR_PAIR_FOOTER));
+    }
+    
+    wrefresh(msg_win);
+    
+    // 일정 시간 후 메시지 창 제거
+    napms(1500); // 1.5초 대기
+    
+    // 윈도우 정리 및 화면 갱신
+    delwin(msg_win);
+    touchwin(stdscr);
+    refresh();
+}
+
+// 복사 진행률 표시 함수
+void ui_display_copy_progress(CopyTask* task) {
+    if (!task) return;
+    
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    // 진행률 창 크기 및 위치 계산
+    int progress_width = screen_cols / 2;
+    if (progress_width < 40) progress_width = screen_cols - 4;
+    if (progress_width > screen_cols - 4) progress_width = screen_cols - 4;
+    
+    int progress_height = 5;
+    int start_y = screen_rows - progress_height - 2;
+    int start_x = (screen_cols - progress_width) / 2;
+    
+    // 진행률 창 생성
+    WINDOW *progress_win = newwin(progress_height, progress_width, start_y, start_x);
+    if (!progress_win) return;
+    
+    // 테두리 설정 및 배경색 설정
+    box(progress_win, 0, 0);
+    wbkgd(progress_win, COLOR_PAIR(COLOR_PAIR_REGULAR));
+    
+    // 파일 이름 및 상태 표시
+    mvwprintw(progress_win, 1, 2, "복사 중: %s", task->dest_name);
+    
+    // 진행률 계산
+    pthread_mutex_lock(&task->progress_mutex);
+    double progress_percent = 0.0;
+    if (task->total_size > 0) {
+        progress_percent = (double)task->copied_size / task->total_size * 100.0;
+    }
+    pthread_mutex_unlock(&task->progress_mutex);
+    
+    // 진행률 막대 표시
+    int bar_width = progress_width - 10;
+    int filled_width = (int)(bar_width * progress_percent / 100.0);
+    
+    mvwprintw(progress_win, 2, 2, "[");
+    for (int i = 0; i < bar_width; i++) {
+        if (i < filled_width) {
+            waddch(progress_win, '=');
+        } else {
+            waddch(progress_win, ' ');
+        }
+    }
+    wprintw(progress_win, "] %.1f%%", progress_percent);
+    
+    // 취소 안내 표시
+    mvwprintw(progress_win, 3, 2, "취소: ESC");
+    
+    wrefresh(progress_win);
+    delwin(progress_win);
+}
+
+// 복사 작업 취소 확인 함수
+bool ui_confirm_cancel_copy(const char* filename) {
+    char message[MAX_PATH_LEN + 30];
+    snprintf(message, sizeof(message), "'%s' 복사를 취소하시겠습니까?", filename);
+    return ui_show_confirmation_dialog(message);
+}

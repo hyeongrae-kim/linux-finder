@@ -73,4 +73,18 @@ void refresh_screen();
  */
 void resize_ui();
 
+// 추가할 함수들
+
+// 확인 다이얼로그 표시
+bool ui_show_confirmation_dialog(const char* message);
+
+// 임시 메시지 표시
+void ui_display_temporary_message(const char* message, bool is_error);
+
+// 복사 진행률 표시
+void ui_display_copy_progress(CopyTask* task);
+
+// 복사 작업 취소 확인
+bool ui_confirm_cancel_copy(const char* filename);
+
 #endif // UI_H

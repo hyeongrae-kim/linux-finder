@@ -84,6 +84,10 @@ bool is_directory(const FileEntry *file);
 // 파일을 편집기로 여는 함수
 bool edit_file(const char *path);
 
+// 파일이나 디렉토리 삭제하는 함수
+bool delete_file(const char *path);
+bool delete_directory_recursive(const char *path);
+
 // 복사-붙여넣기 관련 함수들
 bool copy_to_clipboard(const char *file_path);
 bool paste_from_clipboard(const char *dest_dir);
