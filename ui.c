@@ -106,7 +106,7 @@ void display_files(FileEntry files[], int num_files, int current_selection, int 
     int size_col_width = max_x - name_col_width - type_col_width - mtime_col_width;
 
     // 각 컬럼 너비가 최소값 이상인지 확인 (화면이 매우 작을 때 크래시 방지)
-    if (name_col_width < 1 || type_col_width < 1 || mtime_col_width < 1 || size_col_width < 1) {
+    if (name_col_width < 10 || type_col_width < 10 || mtime_col_width < 10 || size_col_width < 10) {
          // 화면이 너무 작아 컬럼을 표시할 수 없음, 오류 처리 또는 최소 레이아웃 표시 고려
          mvwprintw(main_win, 0, 0, "Terminal too small");
          wrefresh(main_win);
